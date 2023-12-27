@@ -1,17 +1,27 @@
 #include <Arduino.h>
 
-const int frequency = 50; // Hz
-const int dutyCycle = 100;   // %
+//led pwm
+const int pwmFrequency = 5000; // Hz
+const int pwmChannel = 0;
+const int ledPin = 13;
+const int resolution = 8; //max resolution of the DMX512 protocol
+
+int dutyCycle = 1;
 
 void setup()
 {
-    pinMode(26, OUTPUT);
+    ledcSetup(pwmChannel, pwmFrequency, resolution);
+    ledcAttachPin(ledPin, pwmChannel);
+    //pinMode(ledPin, OUTPUT);
 }
 
 void loop()
 {
-    digitalWrite(26, HIGH);
-    delay((1000 / frequency) * dutyCycle/100);
-    digitalWrite(26, LOW);
-    delay((1000 / frequency) * (100 - dutyCycle)/100);
+    ledcWrite(pwmChannel, dutyCycle);
+    /*dutyCycle++;
+    if (dutyCycle > 255)
+    {
+        dutyCycle = 0;
+    }
+    delay(5);*/
 }
