@@ -5,8 +5,8 @@
 const int pwmFrequency = 5000; // Hz
 const int pwmChannel = 0;
 const int ledPin = 13;
-const int resolution = 8; // max resolution of the DMX512 protocol
-int dutyCycle = 1;
+const int resolution = 8; // max resolution of the DMX512 protocol values
+int dutyCycle = 255;
 
 // dmx
 const int tx_pin = 17;  // TXD_2 not used, i dont know if it is needed
@@ -19,80 +19,102 @@ bool dmxIsConnected = false;
 uint8_t data[DMX_PACKET_SIZE]; // the data read from the DMX bus
 
 unsigned long lastUpdate = millis();
-/*
-//tasks
-TaskHandle_t ledControl = NULL;
-TaskHandle_t dmxReceive = NULL;
+
+// FreeRTOS stuff
+// tasks
+TaskHandle_t ledControlHandle = NULL;
+TaskHandle_t dmxReceiveHandle = NULL;
+TaskHandle_t serialPrintTaskHandle = NULL;
+// queues
+QueueHandle_t printQueue;
+QueueHandle_t ledEffectParametersQueue;
+
+// struct that will be sent to the led control task
+struct ledEffectParameters
+{
+    uint8_t intensity;     // CH1
+    uint8_t strobePeriod;  // CH2
+    uint8_t lightDuration; // CH3
+};
+
+void printString(const char *string)
+{
+    char *message = (char *)malloc((strlen(string) + 1) * sizeof(char)); // Allocate memory for the string
+    strcpy(message, string);                                             // Copy the string into the allocated memory
+
+    if (xQueueSend(printQueue, &message, portMAX_DELAY) != pdPASS) // Send the pointer to the queue
+    {
+        // If xQueueSend failed, free the memory to prevent a leak
+        free(message);
+    }
+}
 
 void ledControlTask(void *pvParameters)
 {
+    ledEffectParameters effect;
     while (true)
     {
         ledcWrite(pwmChannel, dutyCycle);
-        dutyCycle++;
-        if (dutyCycle > 255)
-        {
-            dutyCycle = 0;
-        }
-        delay(5);
     }
 }
 
 void dmxRecieveTask(void *pvParameters)
 {
-    dmx_packet_t packet;
+    static dmx_packet_t packet;
+    char message[50]; // Buffer for formatting the message
+    ledEffectParameters recievedParameters;
 
     while (true)
     {
         if (dmx_receive(dmxPort, &packet, DMX_TIMEOUT_TICK))
         {
-            //If this code gets called, it means we've received DMX data!
-
-            unsigned long now = millis();
-
-            //We should check to make sure that there weren't any DMX errors. 
+            // We should check to make sure that there weren't any DMX errors.
             if (!packet.err)
             {
-                // If this is the first DMX data we've received, lets log it! 
+                // If this is the first DMX data we've received, lets log it!
                 if (!dmxIsConnected)
                 {
-                    Serial.println("DMX is connected!");
+                    printString("DMX connected!\n");
                     dmxIsConnected = true;
                 }
 
-                // Don't forget we need to actually read the DMX data into our buffer so
-                // that we can print it out. 
                 dmx_read(dmxPort, data, packet.size);
-
-                if (now - lastUpdate > 10)
-                {
-                    // Print the received start code - it's usually 0.
-                    Serial.printf("Start code is 0x%02X and slot 1 is 0x%02X\n", data[0], data[1]);
-                    lastUpdate = now;
-                }
+                snprintf(message, sizeof(message), "Start code is 0x%02X and slot 1 is 0x%02X\n", data[0], data[1]);
+                printString(message);
             }
             else
             {
-            //   A DMX error occurred! This can happen when you first
-            //   connect or disconnect your DMX devices. If you are consistently getting
-            //   DMX errors, then something may have gone wrong with your code or
-            //   something is seriously wrong with your DMX transmitter. 
-                Serial.println("A DMX error occurred.");
+                // A DMX error occurred! This can happen when you connect or disconnect your DMX devices.
+                // If you are consistently getting DMX errors, something may have gone wrong.
+                printString("DMX error occured!\n");
             }
         }
-        else if (dmxIsConnected)
+        /*else if (dmxIsConnected)
         {
             // If DMX times out after having been connected, it likely means that the
             // DMX cable was unplugged.
-            Serial.println("DMX was disconnected.");
+            printString("DMX disconnected!\n");
             dmx_driver_delete(dmxPort);
 
             // Stop the program.
             while (true)
                 yield();
+        }*/
+    }
+}
+
+void serialPrintTask(void *parameter)
+{
+    char *message;
+    while (true)
+    {
+        if (xQueueReceive(printQueue, &message, portMAX_DELAY))
+        {
+            Serial.println(message);
+            free(message); // Free the memory after printing the string
         }
     }
-}*/
+}
 
 void setup()
 {
@@ -107,66 +129,32 @@ void setup()
     // ...install the DMX driver...
     dmx_driver_install(dmxPort, &config, DMX_INTR_FLAGS_DEFAULT);
     // ...and then set the communication pins
-    dmx_set_pin(dmxPort, tx_pin, rx_pin, rts_pin); 
+    dmx_set_pin(dmxPort, tx_pin, rx_pin, rts_pin);
+
+    // Create queue for printing
+    printQueue = xQueueCreate(10, sizeof(char *));
+    if (printQueue == NULL)
+    {
+        Serial.println("Error creating the serial print queue");
+        vTaskDelete(NULL); // this should end the program since this is the only task running
+    }
+    ledEffectParametersQueue = xQueueCreate(10, sizeof(ledEffectParameters));
+    if (ledEffectParametersQueue == NULL)
+    {
+        Serial.println("Error creating the ledEffectParameters queue");
+        vTaskDelete(NULL); // this should end the program since this is the only task running
+    }
+
+    // Create tasks
+    xTaskCreatePinnedToCore(serialPrintTask, "Serial Print Task", 1024, NULL, 1, &serialPrintTaskHandle, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ledControlTask, "LED Control Task", 1024, NULL, 1, &ledControlHandle, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(dmxRecieveTask, "DMX Recieve Task", 2048, NULL, 1, &dmxReceiveHandle, APP_CPU_NUM);
+
+    // Delete "setup and loop" task
+    vTaskDelete(NULL);
 }
 
 void loop()
 {
-    dmx_packet_t packet;
-
-    if (dmx_receive(dmxPort, &packet, DMX_TIMEOUT_TICK)) 
-    {
-        /* If this code gets called, it means we've received DMX data! */
-
-        unsigned long now = millis();
-
-        /* We should check to make sure that there weren't any DMX errors. */
-        if (!packet.err)
-        {
-            /* If this is the first DMX data we've received, lets log it! */
-            if (!dmxIsConnected)
-            {
-                Serial.println("DMX is connected!");
-                dmxIsConnected = true;
-            }
-
-            /* Don't forget we need to actually read the DMX data into our buffer so
-              that we can print it out. */
-            dmx_read(dmxPort, data, packet.size);
-
-            if (now - lastUpdate > 10)
-            {
-                /* Print the received start code - it's usually 0. */
-                Serial.printf("Start code is 0x%02X and slot 1 is 0x%02X\n", data[0], data[1]);
-                lastUpdate = now;
-            }
-        }
-        else
-        {
-            /* A DMX error occurred! This can happen when you first
-              connect or disconnect your DMX devices. If you are consistently getting
-              DMX errors, then something may have gone wrong with your code or
-              something is seriously wrong with your DMX transmitter. */
-            Serial.println("A DMX error occurred.");
-        }
-    }
-    else if (dmxIsConnected)
-    {
-        /* If DMX times out after having been connected, it likely means that the
-          DMX cable was unplugged.*/
-        Serial.println("DMX was disconnected.");
-        dmx_driver_delete(dmxPort);
-
-        /* Stop the program. */
-        while (true)
-            yield();
-    }
-
-    ledcWrite(pwmChannel, dutyCycle);
-    /*dutyCycle++;
-    if (dutyCycle > 255)
-    {
-        dutyCycle = 0;
-    }
-    delay(5);*/
+    // this should never be executed
 }
