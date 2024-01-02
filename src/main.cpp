@@ -13,6 +13,21 @@ const uint8_t rx_pin = 16;  // RXD_2
 const uint8_t rts_pin = 21; // not used because the module does it automatically, and i dont know if it is needed
 const dmx_port_t dmxPort = DMX_NUM_2;
 
+// Intervals for different effects
+// channel 1: intensity
+const uint8_t intensityMin = 0;   // Lowest intensity
+const uint8_t intensityMax = 255; // Highest intensity
+// channel 2: strobe speed
+const uint8_t strobeSpeedMin = 0;   // Slowest speed
+const uint8_t strobeSpeedMax = 255; // Fastest speed
+// channel 3: light duration
+const uint8_t blackoutMin = 0;      // No light
+const uint8_t blackoutMax = 4;      // No light
+const uint8_t durationMin = 5;      // Shortest duration
+const uint8_t durationMax = 250;    // Longest duration
+const uint8_t lightFullOnMin = 251; // Full on
+const uint8_t lightFullOnMax = 255; // Full on
+
 // FreeRTOS stuff
 // tasks
 TaskHandle_t ledControlHandle = NULL;
@@ -29,6 +44,7 @@ struct ledEffectParameters
     uint8_t strobeSpeed;   // CH2
     uint8_t lightDuration; // CH3
 
+    // This is needed for the == operator to work
     bool operator==(const ledEffectParameters &other) const
     {
         return (intensity == other.intensity &&
@@ -40,22 +56,14 @@ struct ledEffectParameters
                   other.lightDuration >= lightFullOnMin && other.lightDuration <= lightFullOnMax) ||
                  lightDuration == other.lightDuration));
     }
+
+    // This is needed for the != operator to work
+    bool operator!=(const ledEffectParameters &other) const
+    {
+        return !(*this == other);
+    }
 };
 
-// Channel intervals for effects
-// channel 1: intensity
-const uint8_t intensityMin = 0;   // Lowest intensity
-const uint8_t intensityMax = 255; // Highest intensity
-// channel 2: strobe speed
-const uint8_t strobeSpeedMin = 0;   // Slowest speed
-const uint8_t strobeSpeedMax = 255; // Fastest speed
-// channel 3: light duration
-const uint8_t blackoutMin = 0;      // No light
-const uint8_t blackoutMax = 4;      // No light
-const uint8_t durationMin = 5;      // Shortest duration
-const uint8_t durationMax = 250;    // Longest duration
-const uint8_t lightFullOnMin = 251; // Full on
-const uint8_t lightFullOnMax = 255; // Full on
 
 void sendStringToPrintQueue(const char *string)
 {
@@ -84,9 +92,9 @@ void ledControlTask(void *pvParameters)
 void dmxRecieveTask(void *pvParameters)
 {
     bool dmxIsConnected = false;
+    static dmx_packet_t packet;    // the packet structure that will be filled with the data from the DMX bus
     uint8_t data[DMX_PACKET_SIZE]; // the data read from the DMX bus
-    static dmx_packet_t packet;
-    char message[70]; // Buffer for formatting the message
+    char message[70];              // Buffer for formatting the message for the printing
     ledEffectParameters recievedParameters;
     ledEffectParameters lastSentParameters;
 
@@ -108,13 +116,16 @@ void dmxRecieveTask(void *pvParameters)
                 recievedParameters.strobeSpeed = data[2];   // CH2
                 recievedParameters.lightDuration = data[3]; // CH3
 
-                if (recievedParameters == lastSentParameters)
+                if (recievedParameters != lastSentParameters)
                 {
                     // Send the parameters to the led control task
                     if (xQueueSend(ledEffectParametersQueue, &recievedParameters, portMAX_DELAY) == pdPASS)
                     {
                         lastSentParameters = recievedParameters;
-                        snprintf(message, sizeof(message), "SC: 0x%02X, CH1: %d, CH2: %d, CH3: %d.\n", data[0], recievedParameters.intensity, recievedParameters.strobeSpeed, recievedParameters.lightDuration);
+                        snprintf(message, sizeof(message), "SC: 0x%02X, CH1: %d, CH2: %d, CH3: %d.\n",
+                                 data[0], recievedParameters.intensity,
+                                 recievedParameters.strobeSpeed,
+                                 recievedParameters.lightDuration);
                         sendStringToPrintQueue(message);
                     }
                     else
