@@ -13,6 +13,10 @@ const uint8_t rx_pin = 16;  // RXD_2
 const uint8_t rts_pin = 21; // not used because the module does it automatically, and i dont know if it is needed
 const dmx_port_t dmxPort = DMX_NUM_2;
 
+// effect configuration
+const int strobePeriodMin = 30;  // Fastest strobe
+const int strobePeriodMax = 2000; // Slowest strobe
+
 // Intervals for different effects
 // channel 1: intensity
 const uint8_t intensityMin = 0;   // Lowest intensity
@@ -28,16 +32,6 @@ const uint8_t durationMax = 250;    // Longest duration
 const uint8_t lightFullOnMin = 251; // Full on
 const uint8_t lightFullOnMax = 255; // Full on
 
-// FreeRTOS stuff
-// tasks
-TaskHandle_t ledControlHandle = NULL;
-TaskHandle_t dmxReceiveHandle = NULL;
-TaskHandle_t serialPrintTaskHandle = NULL;
-// queues
-QueueHandle_t serialPrintQueue;
-QueueHandle_t ledEffectParametersQueue;
-
-// struct that will be sent to the led control task
 struct ledEffectParameters
 {
     uint8_t intensity;     // CH1
@@ -64,6 +58,34 @@ struct ledEffectParameters
     }
 };
 
+struct strobeParameters
+{
+    uint8_t dutyCycle;
+    int lightOnTime;
+    int lightOffTime;
+    bool isLedOn;
+    unsigned long lastSwitch;
+};
+
+ledEffectParameters effectParameters;
+strobeParameters strobe;
+
+// FreeRTOS stuff
+// tasks
+TaskHandle_t ledControlHandle = NULL;
+TaskHandle_t dmxReceiveHandle = NULL;
+TaskHandle_t serialPrintTaskHandle = NULL;
+// queues
+QueueHandle_t serialPrintQueue;
+QueueHandle_t ledEffectParametersQueue;
+// timers
+TimerHandle_t ledOnTimer = NULL;
+TimerHandle_t ledOffTimer = NULL;
+TimerHandle_t oneShotSyncTimer = NULL;
+
+// Function prototypes
+void ledOnTimerCallback(TimerHandle_t xTimer);
+void ledOffTimerCallback(TimerHandle_t xTimer);
 
 void sendStringToPrintQueue(const char *string)
 {
@@ -77,14 +99,216 @@ void sendStringToPrintQueue(const char *string)
     }
 }
 
+void setLightPwm()
+{
+    if (effectParameters.lightDuration >= blackoutMin && effectParameters.lightDuration <= blackoutMax)
+    {
+        ledcWrite(pwmChannel, 0);
+        // strobe.isLedOn = false;
+    }
+    else
+    {
+        ledcWrite(pwmChannel, effectParameters.intensity);
+        // strobe.isLedOn = true;
+    }
+}
+
+void switchOnOff()
+{
+    if (strobe.isLedOn)
+    {
+        ledcWrite(pwmChannel, 0);
+        strobe.isLedOn = false;
+        strobe.lastSwitch = millis();
+        sendStringToPrintQueue("LED OFF");
+    }
+    else
+    {
+        setLightPwm();
+        strobe.isLedOn = true;
+        strobe.lastSwitch = millis();
+        sendStringToPrintQueue("LED ON");
+    }
+}
+
+int getStrobePeriod()
+{
+    return map(effectParameters.strobeSpeed, strobeSpeedMin, strobeSpeedMax, strobePeriodMax, strobePeriodMin);
+}
+
+void refreshLedOnTimer()
+{
+    xTimerChangePeriod(ledOnTimer, pdMS_TO_TICKS(strobe.lightOffTime), portMAX_DELAY);
+    if (ledOnTimer == NULL)
+    {
+        sendStringToPrintQueue("Error refreshing the led ON timer\n");
+    }
+}
+
+void refreshLedOffTimer()
+{
+    xTimerChangePeriod(ledOffTimer, pdMS_TO_TICKS(strobe.lightOnTime), portMAX_DELAY);
+    if (ledOffTimer == NULL)
+    {
+        sendStringToPrintQueue("Error refreshing the led OFF timer\n");
+    }
+}
+
+void ledOnTimerCallback(TimerHandle_t xTimer)
+{
+    setLightPwm();
+    strobe.isLedOn = true;
+    strobe.lastSwitch = millis();
+    sendStringToPrintQueue("LED ON by timer");
+    refreshLedOffTimer();
+}
+
+void ledOffTimerCallback(TimerHandle_t xTimer)
+{
+    ledcWrite(pwmChannel, 0);
+    strobe.isLedOn = false;
+    strobe.lastSwitch = millis();
+    sendStringToPrintQueue("LED OFF by timer");
+    refreshLedOnTimer();
+}
+
+void oneShotSyncTimerCallback(TimerHandle_t xTimer)
+{
+    char message[100];
+    sendStringToPrintQueue("SYNC timer expired");
+    switchOnOff();
+    if (strobe.isLedOn)
+    {
+        if (xTimerChangePeriod(ledOffTimer, pdMS_TO_TICKS(strobe.lightOnTime), portMAX_DELAY) != pdPASS)
+        {
+            sniprintf(message, sizeof(message), "Error changing the led OFF timer period, tried %d", strobe.lightOnTime);
+            sendStringToPrintQueue(message);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), "Changed the led OFF timer period to %d", strobe.lightOnTime);
+            sendStringToPrintQueue(message);
+        }      
+    }
+    else
+    {
+        if (xTimerChangePeriod(ledOnTimer, pdMS_TO_TICKS(strobe.lightOffTime), portMAX_DELAY) != pdPASS)
+        {
+            sniprintf(message, sizeof(message), "Error changing the led ON timer period, tried %d", strobe.lightOffTime);
+            sendStringToPrintQueue(message);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), "Changed the led ON timer period to %d", strobe.lightOffTime);
+            sendStringToPrintQueue(message);
+        }
+    }
+}
+
+void refreshSyncTimer()
+{
+    // print the time from last switch
+    char message[70];
+    sendStringToPrintQueue("Refresh syncTimer called");
+    xTimerStop(ledOnTimer, portMAX_DELAY);
+    xTimerStop(ledOffTimer, portMAX_DELAY);
+    sendStringToPrintQueue("Stopped the led timers");
+
+    int timeFromLastSwitch = millis() - strobe.lastSwitch;
+
+    if (strobe.isLedOn)
+    {
+        // if ((strobe.lightOnTime - timeFromLastSwitch) < 1)
+        // {
+        //     oneShotSyncTimerCallback(NULL);
+        //     sendStringToPrintQueue("Timer called artificially to turn LED OFF");
+        // }
+        // else
+        // {
+        //     xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOnTime - timeFromLastSwitch), portMAX_DELAY);
+        //     snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED OFF, timerExpiring in %d", strobe.lightOnTime - timeFromLastSwitch);
+        //     sendStringToPrintQueue(message);
+        // }
+        if ((strobe.lightOnTime - timeFromLastSwitch) < 1)
+        {
+            xTimerStop(oneShotSyncTimer, portMAX_DELAY);
+            oneShotSyncTimerCallback(NULL);
+            sendStringToPrintQueue("Timer called artificially to turn LED OFF");
+            // snprintf(message, sizeof(message), "did nothing, timer length: %d", strobe.lightOnTime - timeFromLastSwitch);
+            // sendStringToPrintQueue(message);
+        }
+        else
+        {
+            xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOnTime - timeFromLastSwitch), portMAX_DELAY);
+            snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED OFF, timerExpiring in %d", strobe.lightOnTime - timeFromLastSwitch);
+            sendStringToPrintQueue(message);
+        }
+    }
+    else
+    {
+        if ((strobe.lightOnTime - timeFromLastSwitch) < 1)
+        {
+            xTimerStop(oneShotSyncTimer, portMAX_DELAY);
+            oneShotSyncTimerCallback(NULL);
+            sendStringToPrintQueue("Timer called artificially to turn LED ON");
+            // snprintf(message, sizeof(message), "did nothing, timer length: %d", strobe.lightOffTime - timeFromLastSwitch);
+            // sendStringToPrintQueue(message);
+        }
+        else
+        {
+            xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOffTime - timeFromLastSwitch), portMAX_DELAY);
+            snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED ON. timerExpiring in %d", strobe.lightOffTime - timeFromLastSwitch);
+            sendStringToPrintQueue(message);
+        }
+    }
+    if (oneShotSyncTimer == NULL)
+    {
+        sendStringToPrintQueue("Error refreshing the one shot sync timer\n");
+    }
+}
+
 void ledControlTask(void *pvParameters)
 {
-    ledEffectParameters effect;
+    char message[70];
+    ledEffectParameters lastEffectParameters;
+    int strobePeriod;
+    if (xQueueReceive(ledEffectParametersQueue, &effectParameters, portMAX_DELAY) == pdTRUE)
+    {
+        strobePeriod = getStrobePeriod();
+        strobe.dutyCycle = effectParameters.intensity;
+        strobe.lightOnTime = map(effectParameters.lightDuration, durationMin, durationMax, 1, strobePeriod - 1);
+        strobe.lightOffTime = strobePeriod - strobe.lightOnTime;
+        ledOnTimerCallback(NULL);
+        lastEffectParameters = effectParameters;
+    }
     while (true)
     {
-        if (xQueueReceive(ledEffectParametersQueue, &effect, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(ledEffectParametersQueue, &effectParameters, portMAX_DELAY) == pdTRUE)
         {
-            ledcWrite(pwmChannel, effect.intensity);
+            // Print the state of the led
+            snprintf(message, sizeof(message), "LED state: %s", strobe.isLedOn ? "ON" : "OFF");
+            sendStringToPrintQueue(message);
+
+            strobePeriod = getStrobePeriod();
+            strobe.dutyCycle = effectParameters.intensity;
+            if (effectParameters.lightDuration > blackoutMax && effectParameters.lightDuration < lightFullOnMin)
+            {
+                strobe.lightOnTime = map(effectParameters.lightDuration, durationMin, durationMax, 1, strobePeriod - 1);
+                strobe.lightOffTime = strobePeriod - strobe.lightOnTime;
+            }
+            if (effectParameters.strobeSpeed != lastEffectParameters.strobeSpeed)
+            {
+                refreshSyncTimer();
+            }
+            if (effectParameters.intensity != lastEffectParameters.intensity && strobe.isLedOn)
+            {
+                setLightPwm();
+            }
+            lastEffectParameters = effectParameters;
+        }
+        else
+        {
+            sendStringToPrintQueue("Error receiving ledEffectParameters from the queue\n");
         }
     }
 }
@@ -122,7 +346,7 @@ void dmxRecieveTask(void *pvParameters)
                     if (xQueueSend(ledEffectParametersQueue, &recievedParameters, portMAX_DELAY) == pdPASS)
                     {
                         lastSentParameters = recievedParameters;
-                        snprintf(message, sizeof(message), "SC: 0x%02X, CH1: %d, CH2: %d, CH3: %d.\n",
+                        snprintf(message, sizeof(message), "SC: 0x%02X, CH1: %3d, CH2: %3d, CH3: %3d",
                                  data[0], recievedParameters.intensity,
                                  recievedParameters.strobeSpeed,
                                  recievedParameters.lightDuration);
@@ -141,21 +365,29 @@ void dmxRecieveTask(void *pvParameters)
                 sendStringToPrintQueue("DMX error occured!\n");
             }
         }
-        else if (dmxIsConnected)
+        else // if (dmxIsConnected)
         {
             // If DMX times out after having been connected, it likely means that the DMX cable was unplugged.
             sendStringToPrintQueue("DMX disconnected!\n");
-
-            /* dmx_driver_delete(dmxPort);
-            // Stop the program.
-            while (true)
-                yield();
-            */
+            dmxIsConnected = false;
         }
     }
 }
 
 void serialPrintTask(void *parameter)
+{
+    char *message = NULL;
+    while (true)
+    {
+        if (xQueueReceive(serialPrintQueue, &message, portMAX_DELAY))
+        {
+            Serial.println(message);
+            free(message);  // Free the memory after printing the string
+            message = NULL; // Reset the pointer after freeing the memory
+        }
+    }
+}
+/*void serialPrintTask(void *parameter)
 {
     char *message;
     while (true)
@@ -166,7 +398,7 @@ void serialPrintTask(void *parameter)
             free(message); // Free the memory after printing the string
         }
     }
-}
+}*/
 
 void setup()
 {
@@ -175,6 +407,10 @@ void setup()
     // LED PWM configuration
     ledcSetup(pwmChannel, pwmFrequency, resolution);
     ledcAttachPin(ledPin, pwmChannel);
+
+    // Default state of the LED
+    ledcWrite(pwmChannel, 0);
+    strobe.isLedOn = false;
 
     // First, use the default DMX configuration...
     dmx_config_t config = DMX_CONFIG_DEFAULT;
@@ -198,9 +434,19 @@ void setup()
     }
 
     // Create tasks
-    xTaskCreatePinnedToCore(serialPrintTask, "Serial Print Task", 1024, NULL, 1, &serialPrintTaskHandle, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(ledControlTask, "LED Control Task", 1024, NULL, 1, &ledControlHandle, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(dmxRecieveTask, "DMX Recieve Task", 4096, NULL, 1, &dmxReceiveHandle, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(serialPrintTask, "SerialPrintTask", 1024, NULL, 1, &serialPrintTaskHandle, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ledControlTask, "LEDControlTask", 2048, NULL, 1, &ledControlHandle, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(dmxRecieveTask, "DMXRecieveTask", 4096, NULL, 1, &dmxReceiveHandle, APP_CPU_NUM);
+
+    // Create timers
+    oneShotSyncTimer = xTimerCreate("OneShtSyncTimer", pdMS_TO_TICKS(9999), pdFALSE, NULL, oneShotSyncTimerCallback);
+    ledOffTimer = xTimerCreate("LedOFFTimer", pdMS_TO_TICKS(9999), pdFALSE, NULL, ledOffTimerCallback);
+    ledOnTimer = xTimerCreate("LedONTimer", pdMS_TO_TICKS(9999), pdFALSE, NULL, ledOnTimerCallback);
+    if (oneShotSyncTimer == NULL || ledOffTimer == NULL || ledOnTimer == NULL)
+    {
+        sendStringToPrintQueue("Error creating the timers\n");
+        vTaskDelete(NULL); // this should end the program since this is the only task running
+    }
 
     // Delete "setup and loop" task
     vTaskDelete(NULL);
