@@ -2,20 +2,20 @@
 #include <esp_dmx.h>
 
 // led pwm configuration
-const int pwmFrequency = 5000; // Hz
+const int pwmFrequency = 5000; // Hz // TODO: Find the optimal frequency to prevent whine from the mosfet driver
 const uint8_t pwmChannel = 0;
-const uint8_t ledPin = 13;    // the pin that the mosfet driver is connected to
+const uint8_t strobeLedPin = 25;    // the pin that the mosfet driver is connected to
 const uint8_t resolution = 8; // max resolution of the DMX512 protocol values
 
 // dmx configuration
-const uint8_t tx_pin = 17;  // TXD_2 not used, i dont know if it is needed
-const uint8_t rx_pin = 16;  // RXD_2
-const uint8_t rts_pin = 21; // not used because the module does it automatically, and i dont know if it is needed
+const uint8_t tx_pin = 17;  // TXD_2 not used, but defined for the dmx_set_pin function
+const uint8_t rx_pin = 16;  // RXD_2 data input from the RS485 module
+const uint8_t rts_pin = 4; // not used, but defined for the dmx_set_pin function
 const dmx_port_t dmxPort = DMX_NUM_2;
 
 // effect configuration
-const int strobePeriodMin = 30;  // Fastest strobe
-const int strobePeriodMax = 2000; // Slowest strobe
+const int strobePeriodMin = 40;  // Fastest strobe
+const int strobePeriodMax = 1000; // Slowest strobe
 
 // Intervals for different effects
 // channel 1: intensity
@@ -31,6 +31,22 @@ const uint8_t durationMin = 5;      // Shortest duration
 const uint8_t durationMax = 250;    // Longest duration
 const uint8_t lightFullOnMin = 251; // Full on
 const uint8_t lightFullOnMax = 255; // Full on
+
+// TODO: Add display and buttons to control the device
+// // Button pins
+// const uint8_t modeButtonPin = 34; 
+// const uint8_t plusButtonPin = 35;
+// const uint8_t minusButtonPin = 32;
+// const uint8_t enterButtonPin = 33; 
+
+// // I2C 7 segment display configuration
+// // pins
+// const uint8_t sdaPin = 21;
+// const uint8_t sclPin = 22;
+
+// TODO: Add fan control depending on the load
+// cooling fan
+const uint8_t fanPin = 26;
 
 struct ledEffectParameters
 {
@@ -218,17 +234,6 @@ void refreshSyncTimer()
 
     if (strobe.isLedOn)
     {
-        // if ((strobe.lightOnTime - timeFromLastSwitch) < 1)
-        // {
-        //     oneShotSyncTimerCallback(NULL);
-        //     sendStringToPrintQueue("Timer called artificially to turn LED OFF");
-        // }
-        // else
-        // {
-        //     xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOnTime - timeFromLastSwitch), portMAX_DELAY);
-        //     snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED OFF, timerExpiring in %d", strobe.lightOnTime - timeFromLastSwitch);
-        //     sendStringToPrintQueue(message);
-        // }
         if ((strobe.lightOnTime - timeFromLastSwitch) < 1)
         {
             xTimerStop(oneShotSyncTimer, portMAX_DELAY);
@@ -387,18 +392,6 @@ void serialPrintTask(void *parameter)
         }
     }
 }
-/*void serialPrintTask(void *parameter)
-{
-    char *message;
-    while (true)
-    {
-        if (xQueueReceive(serialPrintQueue, &message, portMAX_DELAY))
-        {
-            Serial.println(message);
-            free(message); // Free the memory after printing the string
-        }
-    }
-}*/
 
 void setup()
 {
@@ -406,7 +399,7 @@ void setup()
 
     // LED PWM configuration
     ledcSetup(pwmChannel, pwmFrequency, resolution);
-    ledcAttachPin(ledPin, pwmChannel);
+    ledcAttachPin(strobeLedPin, pwmChannel);
 
     // Default state of the LED
     ledcWrite(pwmChannel, 0);
@@ -447,6 +440,10 @@ void setup()
         sendStringToPrintQueue("Error creating the timers\n");
         vTaskDelete(NULL); // this should end the program since this is the only task running
     }
+
+    //fan
+    pinMode(fanPin, OUTPUT);
+    digitalWrite(fanPin, HIGH);
 
     // Delete "setup and loop" task
     vTaskDelete(NULL);
