@@ -1,9 +1,12 @@
 #include <Arduino.h>
-//#include <WrapperFreeRTOS.h>
+#include <WrapperFreeRTOS.h> // FreeRTOS C++ wrapper
 #include <esp_dmx.h>
+#include <esp_log.h>
 
 #include "deviceConfig.h"
-#include "serial.hpp"
+#include "logTask.hpp"
+
+static const char *TAG = "main.cpp";
 
 // Intervals for different effects
 // channel 1: intensity
@@ -20,7 +23,7 @@ const uint8_t durationMax = 250;     // Longest duration
 const uint8_t lightFullOnMin = 251;  // Full on
 const uint8_t lightFullOnMax = 255;  // Full on
 
-SerialLogTask serial("SerialPrintTask", 1, PRO_CPU_NUM);
+LogTask serial(2048, 1, PRO_CPU_NUM);
 
 struct ledEffectParameters {
     uint8_t intensity;      // CH1
@@ -69,19 +72,6 @@ TimerHandle_t oneShotSyncTimer = NULL;
 void ledOnTimerCallback(TimerHandle_t xTimer);
 void ledOffTimerCallback(TimerHandle_t xTimer);
 
-// void sendStringToPrintQueue(const char *string) {
-//     char *message = (char *)malloc((strlen(string) + 1) * sizeof(char));  // Allocate memory for the string
-//     strcpy(message, string);  // Copy the string into the allocated memory
-//     if (&message == NULL) {
-//         Serial.println("Error allocating memory for the message");
-//         return;
-//     }
-//     if (xQueueSend(serialPrintQueue, &message, portMAX_DELAY) != pdPASS) {
-//         Serial.println("Error sending the message to the queue");
-//     }
-//     free(message);
-// }
-
 void setLightPwm() {
     if (effectParameters.lightDuration >= blackoutMin && effectParameters.lightDuration <= blackoutMax) {
         ledcWrite(DEVICECONF_PWM_CHANNEL, 0);
@@ -95,12 +85,12 @@ void switchOnOff() {
         ledcWrite(DEVICECONF_PWM_CHANNEL, 0);
         strobe.isLedOn = false;
         strobe.lastSwitch = millis();
-        serial.queuePrint("LED OFF");
+        serial.queueLog(TAG, "LED OFF", LogLevel::VERBOSE);
     } else {
         setLightPwm();
         strobe.isLedOn = true;
         strobe.lastSwitch = millis();
-        serial.queuePrint("LED ON");
+        serial.queueLog(TAG, "LED ON", LogLevel::VERBOSE);
     }
 }
 
@@ -112,14 +102,14 @@ int getStrobePeriod() {
 void refreshLedOnTimer() {
     xTimerChangePeriod(ledOnTimer, pdMS_TO_TICKS(strobe.lightOffTime), portMAX_DELAY);
     if (ledOnTimer == NULL) {
-        serial.queuePrint("Error refreshing the led ON timer\n");
+        serial.queueLog(TAG, "Error refreshing the led ON timer", LogLevel::ERROR);
     }
 }
 
 void refreshLedOffTimer() {
     xTimerChangePeriod(ledOffTimer, pdMS_TO_TICKS(strobe.lightOnTime), portMAX_DELAY);
     if (ledOffTimer == NULL) {
-        serial.queuePrint("Error refreshing the led OFF timer\n");
+        serial.queueLog(TAG, "Error refreshing the led OFF timer", LogLevel::ERROR);
     }
 }
 
@@ -139,25 +129,25 @@ void ledOffTimerCallback(TimerHandle_t xTimer) {
 
 void oneShotSyncTimerCallback(TimerHandle_t xTimer) {
     char message[100];
-    serial.queuePrint("SYNC timer expired");
+    serial.queueLog(TAG, "SYNC timer expired", LogLevel::VERBOSE);
     switchOnOff();
     if (strobe.isLedOn) {
         if (xTimerChangePeriod(ledOffTimer, pdMS_TO_TICKS(strobe.lightOnTime), portMAX_DELAY) != pdPASS) {
-            sniprintf(message, sizeof(message), "Error changing the led OFF timer period, tried %d",
+            sniprintf(message, sizeof(message), "Error changing ledOFF timer period, tried %d",
                       strobe.lightOnTime);
-            serial.queuePrint(message);
+            serial.queueLog(TAG, message, LogLevel::ERROR);
         } else {
-            snprintf(message, sizeof(message), "Changed the led OFF timer period to %d", strobe.lightOnTime);
-            serial.queuePrint(message);
+            snprintf(message, sizeof(message), "Changed ledOFF timer period to %d", strobe.lightOnTime);
+            serial.queueLog(TAG, message, LogLevel::VERBOSE);
         }
     } else {
         if (xTimerChangePeriod(ledOnTimer, pdMS_TO_TICKS(strobe.lightOffTime), portMAX_DELAY) != pdPASS) {
-            sniprintf(message, sizeof(message), "Error changing the led ON timer period, tried %d",
+            sniprintf(message, sizeof(message), "Error changing ledOFF timer period, tried %d",
                       strobe.lightOffTime);
-            serial.queuePrint(message);
+            serial.queueLog(TAG, message, LogLevel::ERROR);
         } else {
             snprintf(message, sizeof(message), "Changed the led ON timer period to %d", strobe.lightOffTime);
-            serial.queuePrint(message);
+            serial.queueLog(TAG, message, LogLevel::VERBOSE);
         }
     }
 }
@@ -165,10 +155,10 @@ void oneShotSyncTimerCallback(TimerHandle_t xTimer) {
 void refreshSyncTimer() {
     // print the time from last switch
     char message[70];
-    serial.queuePrint("Refresh syncTimer called");
+    serial.queueLog(TAG, "Refresh syncTimer called", LogLevel::VERBOSE);
     xTimerStop(ledOnTimer, portMAX_DELAY);
     xTimerStop(ledOffTimer, portMAX_DELAY);
-    serial.queuePrint("Stopped the led timers");
+    serial.queueLog(TAG, "Stopped the led timers", LogLevel::VERBOSE);
 
     int timeFromLastSwitch = millis() - strobe.lastSwitch;
 
@@ -176,31 +166,29 @@ void refreshSyncTimer() {
         if ((strobe.lightOnTime - timeFromLastSwitch) < 1) {
             xTimerStop(oneShotSyncTimer, portMAX_DELAY);
             oneShotSyncTimerCallback(NULL);
-            serial.queuePrint("Timer called artificially to turn LED OFF");
+            serial.queueLog(TAG, "Timer called artificially to turn LED OFF", LogLevel::VERBOSE);
         } else {
             xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOnTime - timeFromLastSwitch),
                                portMAX_DELAY);
-            snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED OFF, timerExpiring in %d",
+            snprintf(message, sizeof(message), "Refreshing syncTimer to turn ledOFF exp-%d",
                      strobe.lightOnTime - timeFromLastSwitch);
-            serial.queuePrint(message);
+            serial.queueLog(TAG, message, LogLevel::VERBOSE);
         }
     } else {
         if ((strobe.lightOnTime - timeFromLastSwitch) < 1) {
             xTimerStop(oneShotSyncTimer, portMAX_DELAY);
             oneShotSyncTimerCallback(NULL);
-            serial.queuePrint("Timer called artificially to turn LED ON");
-            // snprintf(message, sizeof(message), "did nothing, timer length: %d",
-            // strobe.lightOffTime - timeFromLastSwitch); serial.queuePrint(message);
+            serial.queueLog(TAG, "Timer called artificially to turn LED ON", LogLevel::VERBOSE);
         } else {
             xTimerChangePeriod(oneShotSyncTimer, pdMS_TO_TICKS(strobe.lightOffTime - timeFromLastSwitch),
                                portMAX_DELAY);
-            snprintf(message, sizeof(message), "Refreshing syncTimer to turn LED ON. timerExpiring in %d",
+            snprintf(message, sizeof(message), "Refreshing syncTimer to turn ledON exp-%d",
                      strobe.lightOffTime - timeFromLastSwitch);
-            serial.queuePrint(message);
+            serial.queueLog(TAG, message, LogLevel::VERBOSE);
         }
     }
     if (oneShotSyncTimer == NULL) {
-        serial.queuePrint("Error refreshing the one shot sync timer\n");
+        serial.queueLog(TAG, "Error refreshing the one shot sync timer", LogLevel::ERROR);
     }
 }
 
@@ -235,7 +223,7 @@ void ledControlTask(void *pvParameters) {
             }
             lastEffectParameters = effectParameters;
         } else {
-            serial.queuePrint("Error receiving ledEffectParameters from the queue\n");
+            serial.queueLog(TAG, "Error receiving ledEffectParameters from queue", LogLevel::ERROR);
         }
     }
 }
@@ -255,7 +243,7 @@ void dmxRecieveTask(void *pvParameters) {
             if (!packet.err) {
                 // If this is the first DMX data we've received, lets log it!
                 if (!dmxIsConnected) {
-                    serial.queuePrint("DMX connected!\n");
+                    serial.queueLog(TAG, "DMX connected!", LogLevel::VERBOSE);
                     dmxIsConnected = true;
                 }
                 dmx_read(DEVICECONF_DMX_PORT, data, packet.size);
@@ -268,33 +256,23 @@ void dmxRecieveTask(void *pvParameters) {
                     if (xQueueSend(ledEffectParametersQueue, &recievedParameters, portMAX_DELAY) == pdPASS) {
                         lastSentParameters = recievedParameters;
                     } else {
-                        serial.queuePrint("Error sending ledEffectParameters to the queue\n");
+                        serial.queueLog(TAG, "Error sending ledEffectParameters to queue", LogLevel::ERROR);
                     }
                 }
             } else {
-                // A DMX error occurred! This can happen when you connect or disconnect
-                // your DMX devices. If you are consistently getting DMX errors, something
-                // may have gone wrong.
-                serial.queuePrint("DMX error occured!\n");
+                // A DMX error! This can happen when you connect or disconnect your DMX devices. If you are
+                // consistently getting DMX errors, something may be wrong.
+                serial.queueLog(TAG, "DMX error occured!", LogLevel::ERROR);
             }
         } else  // if (dmxIsConnected)
         {
             // If DMX times out after having been connected, it likely means that the DMX
             // cable was unplugged.
-            serial.queuePrint("DMX disconnected!\n");
+            serial.queueLog(TAG, "DMX disconnected!", LogLevel::INFO);
             dmxIsConnected = false;
         }
     }
 }
-
-// void serialPrintTask(void *parameter) {
-//     char *message = NULL;
-//     while (true) {
-//         if (xQueueReceive(serialPrintQueue, &message, portMAX_DELAY)) {
-//             Serial.println(message);
-//         }
-//     }
-// }
 
 void setup() {
     // LED PWM configuration
@@ -313,23 +291,17 @@ void setup() {
     dmx_set_pin(DEVICECONF_DMX_PORT, DEVICECONF_DMX_TX_PIN, DEVICECONF_DMX_RX_PIN, DEVICECONF_DMX_RTS_PIN);
 
     // Setup the serial task
-    serial.initialize();
-    ///*
-    // // Create queue for printing
-    // serialPrintQueue = xQueueCreate(10, sizeof(char *));
-    // if (serialPrintQueue == NULL) {
-    //     Serial.println("Error creating the serial print queue");
-    //     vTaskDelete(NULL);  // this should end the program since this is the only task running
-    // }
+    serial.createQueue();
+    serial.start();
+
     ledEffectParametersQueue = xQueueCreate(10, sizeof(ledEffectParameters));
     if (ledEffectParametersQueue == NULL) {
-        Serial.println("Error creating the ledEffectParameters queue");
-        vTaskDelete(NULL);  // this should end the program since this is the only task running
+        ESP_LOGE(TAG, "Error creating the ledEffectParameters queue");
+        vTaskDelay(5000 / portTICK_PERIOD_MS);  // wait for 1 second
+        ESP.restart();
     }
 
     // Create tasks
-    // xTaskCreatePinnedToCore(serialPrintTask, "SerialPrintTask", 1024, NULL, 1, &serialPrintTaskHandle,
-    //                         PRO_CPU_NUM);
     xTaskCreatePinnedToCore(ledControlTask, "LEDControlTask", 2048, NULL, 1, &ledControlHandle, APP_CPU_NUM);
     xTaskCreatePinnedToCore(dmxRecieveTask, "DMXRecieveTask", 4096, NULL, 2, &dmxReceiveHandle, PRO_CPU_NUM);
 
@@ -339,13 +311,15 @@ void setup() {
     ledOffTimer = xTimerCreate("LedOFFTimer", pdMS_TO_TICKS(9999), pdFALSE, NULL, ledOffTimerCallback);
     ledOnTimer = xTimerCreate("LedONTimer", pdMS_TO_TICKS(9999), pdFALSE, NULL, ledOnTimerCallback);
     if (oneShotSyncTimer == NULL || ledOffTimer == NULL || ledOnTimer == NULL) {
-        serial.queuePrint("Error creating the timers\n");
+        serial.queueLog(TAG, "Error creating the timers", LogLevel::VERBOSE);
         vTaskDelete(NULL);  // this should end the program since this is the only task running
     }
     //*/
     // fan
     pinMode(DEVICECONF_FAN_PIN, OUTPUT);
     digitalWrite(DEVICECONF_FAN_PIN, HIGH);
+
+    serial.queueLog(TAG, "Setup done", LogLevel::INFO);
 
     // Delete "setup and loop" task
     vTaskDelete(NULL);

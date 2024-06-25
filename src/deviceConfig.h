@@ -2,6 +2,7 @@
 
 // PINS
 //  Dmx module
+// in my case I can only use TX2, because TX0 is connected to the esp-prog and used for serial communication
 #define DEVICECONF_DMX_TX_PIN 17 // 1=TX0, 17=TX2
 #define DEVICECONF_DMX_RX_PIN 16 // 3=RX0, 16=RX2
 #define DEVICECONF_DMX_RTS_PIN 4
