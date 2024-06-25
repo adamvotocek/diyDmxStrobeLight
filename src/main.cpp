@@ -3,7 +3,7 @@
 #include <esp_dmx.h>
 #include <esp_log.h>
 
-#include "deviceConfig.h"
+#include "deviceConfig.hpp"
 #include "logTask.hpp"
 
 static const char *TAG = "main.cpp";
