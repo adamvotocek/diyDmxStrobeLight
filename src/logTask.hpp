@@ -5,6 +5,8 @@
 
 enum class LogLevel { NONE, ERROR, WARN, INFO, DEBUG, VERBOSE };
 
+void restartCPU(const char *TAG);
+
 class LogEntry {
    public:
     LogEntry() = default;

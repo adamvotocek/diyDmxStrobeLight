@@ -16,15 +16,11 @@ void LogTask::createQueue() {
     m_queueHandle = xQueueCreate(10, sizeof(LogEntry));
     if (m_queueHandle == NULL) {
         ESP_LOGE(TAG, "Error creating the LogEntry queue");
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-        ESP.restart();
+        restartCPU(TAG);
     }
 }
 
-void LogTask::setup()
-{
-    createQueue();
-}
+void LogTask::setup() { createQueue(); }
 
 // Run is the task's main function. It will be called once the task is started.
 void LogTask::run(void *data) {
@@ -73,6 +69,11 @@ LogEntry::LogEntry(const char tag[11], const char message[51], LogLevel level) :
     strcpy(m_message, message);
 }
 
+void restartCPU(const char *TAG) {
+    ESP_LOGW(TAG, "Restarting the ESP32 in 5 seconds...");
+    delay(5000); // This delay prevents any other tasks from running
+    ESP.restart();
+}
+
 // Global instance of the LogTask
 LogTask logTask(2048, 1, PRO_CPU_NUM);
-

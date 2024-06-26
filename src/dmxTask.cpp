@@ -20,8 +20,7 @@ void DmxTask::createQueue() {
     m_queueHandle = xQueueCreate(10, sizeof(DmxMode<3>));
     if (m_queueHandle == NULL) {
         ESP_LOGE(TAG, "Error creating the DmxMode queue");
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
-        ESP.restart();
+        restartCPU(TAG);
     }
 }
 
