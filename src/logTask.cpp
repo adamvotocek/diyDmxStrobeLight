@@ -7,7 +7,7 @@
 static const char *TAG = "LogTask";
 
 LogTask::LogTask(uint32_t stackSize, uint8_t priority, uint8_t coreId)
-    : Task("SerialTask", stackSize, priority) {
+    : Task("LogTask", stackSize, priority) {
     setCore(coreId);
     m_queueHandle = NULL;
 }
@@ -21,6 +21,12 @@ void LogTask::createQueue() {
     }
 }
 
+void LogTask::setup()
+{
+    createQueue();
+}
+
+// Run is the task's main function. It will be called once the task is started.
 void LogTask::run(void *data) {
     LogEntry entry;
     while (true) {
@@ -66,3 +72,7 @@ LogEntry::LogEntry(const char tag[11], const char message[51], LogLevel level) :
     strcpy(m_tag, tag);
     strcpy(m_message, message);
 }
+
+// Global instance of the LogTask
+LogTask logTask(2048, 1, PRO_CPU_NUM);
+
