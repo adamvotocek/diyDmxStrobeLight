@@ -28,7 +28,7 @@
 
 // Effects
 // Strobe
-#define DEVICECONF_STROBE_PERIOD_MIN 2 // ms
+#define DEVICECONF_STROBE_PERIOD_MIN 30 // ms
 #define DEVICECONF_STROBE_PERIOD_MAX 999 // ms
 
 /*
