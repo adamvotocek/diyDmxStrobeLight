@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <esp_log.h>
 
+// Configuration of things like pin numbers and other device specific settings
 #include "deviceConfig.hpp"
 
 // Import all the different tasks.
@@ -31,4 +32,4 @@ void setup() {
     vTaskDelete(NULL);                                         // Delete "setup and loop" task
 }
 
-void loop() {}  // this should never get executed
+void loop() {}  // This should never get executed as this task is deleted in setup

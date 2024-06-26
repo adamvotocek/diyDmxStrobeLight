@@ -30,20 +30,3 @@
 // Strobe
 #define DEVICECONF_STROBE_PERIOD_MIN 30 // ms
 #define DEVICECONF_STROBE_PERIOD_MAX 999 // ms
-
-/*
-// Intervals for different effects
-// channel 1: intensity
-const uint8_t intensityMin = 0;    // Lowest intensity
-const uint8_t intensityMax = 255;  // Highest intensity
-// channel 2: strobe speed
-const uint8_t strobeSpeedMin = 0;    // Slowest speed
-const uint8_t strobeSpeedMax = 255;  // Fastest speed
-// channel 3: light duration
-const uint8_t blackoutMin = 0;       // No light
-const uint8_t blackoutMax = 4;       // No light
-const uint8_t durationMin = 5;       // Shortest duration
-const uint8_t durationMax = 250;     // Longest duration
-const uint8_t lightFullOnMin = 251;  // Full on
-const uint8_t lightFullOnMax = 255;  // Full on
-*/
