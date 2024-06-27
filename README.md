@@ -3,6 +3,14 @@
 
 This is a fully functional prototype of a strobe light for stage lighting that can be controlled by the DMX512 protocol. It is based on the ESP32 microcontroller. The plan is to make it into a full product.
 
+Current prototype in action:
+
+![prototype](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image5.gif)
+
+Here is a video of the ESP32 on the mainboard (without the power electronics attached) recieving DMX signal from an Arduino UNO:
+
+[![DMX recieve video](https://img.youtube.com/vi/DUpdl1YqVRM/0.jpg)](https://www.youtube.com/watch?v=DUpdl1YqVRM)
+
 <!-- TOC --><a name="table-of-contents"></a>
 ## Table of contents
 <!-- TOC start (generated with https://github.com/derlin/bitdowntoc) -->
@@ -66,19 +74,32 @@ This is how the LED reacts to different channel values.
 <!-- TOC --><a name="electronics-used"></a>
 ## Electronics used
 
-The brain of the whole project is a dual-core ESP32 development board. The microcontroller itself cannot receive the DMX signal, which is based on the RS485. 
+![electronics skeleton](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image13.jpeg)
 
-The conversion of the RS485 signal to serial, which the ESP can process on one of its UARTs, is provided by a module built with the MAX485 chip. 
+The brain of the whole project is a dual-core ESP32 development board, which is seated into a custom made mainboard.
 
-The ESP has a TC4420 MOSFET driver connected to pin 25. 
+![mainboard1](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image14.jpeg)
+![mainboard2](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image18.jpeg)
+![mainboard3](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image19.jpeg)
+![mainboard4](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image20.jpeg)
 
-It can very quickly switch the MOSFET IRFZ44N, through which three COB LEDs are connected, with a combined power of 150W. 
+The microcontroller itself cannot receive the DMX signal, which is based on the RS485. The conversion of the RS485 signal to serial, which the ESP can process on one of its UARTs, is provided by a module built with the MAX485 chip. 
+
+![RS485 module](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image3.jpeg)
+
+The ESP has a TC4420 MOSFET driver connected to pin 25. It can very quickly switch the MOSFET IRFZ44N, through which three COB LEDs are connected, with a combined power of 150W. 
+
+![powerLeds](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image16.jpeg)
 
 An iteresting obstacle in this project is the number of voltage levels present in it. The LEDs run at 32V, the fan at 24V, the MOSFET driver should have a voltage greater than 5V, RS485 needs 5V and its logic is five volts, and the ESP32 can be powered with a higher voltage than 3.3V, but its logic will remain at 3.3V. I solved this with different converters and voltage regulators. It is a bit messy, but it's what I already had.
 
 For the power LEDs I use a boost converter module that can handle up to 10A. The module increases the voltage from 24V to 32V. 
 
+![boost](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image7.jpeg)
+
 To get the 9V for the MOSFET and ESP. For this I used a buck converter.
+
+![buck](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/image8.jpeg)
 
 To obtain 5V for the RS485 module, I used a linear voltage regulator called L7805 with two capacitors for voltage stability. 
 
@@ -89,6 +110,9 @@ I was unable to find a suitable 24V voltage source from which to power the entir
 <!-- TOC --><a name="schematic"></a>
 ## Schematic
 
+[Fritzing schematic here](https://github.com/adamvotocek/diyDmxStrobeLight/tree/main/schematic)
+
+![schematic](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/schematic/fritzingMainBoardSchematic_bb.png)
 
 <!-- TOC --><a name="development-environment"></a>
 ## Development environment
@@ -102,6 +126,8 @@ This project is made in [Visual Studio Code](https://code.visualstudio.com/) wit
 ### Debugging
 
 I used the [ESP-Prog debugger](https://docs.platformio.org/en/stable/plus/debug-tools/esp-prog.html) for hardware JTAG debugging. I also connected the ESP32s RX0, TX0 and EN with it so that I could use the serial monitor. The Platformio debug configuration is reflected in the platformio.ini file.
+
+![esp-prog](https://github.com/adamvotocek/diyDmxStrobeLight/blob/main/images/esp-prog.jpg)
 
 <!-- TOC --><a name="code-documentation"></a>
 ## Code documentation
