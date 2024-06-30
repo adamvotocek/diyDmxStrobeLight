@@ -7,6 +7,10 @@
 #include "deviceConfig.hpp"
 #include "logTask.hpp"
 
+// Global instance of the DmxTask
+DmxTask dmxTask(4096, 2, PRO_CPU_NUM);
+
+// Log tag for this file
 static const char *TAG = "DmxTask";
 
 DmxTask::DmxTask(uint32_t stackSize, uint8_t priority, uint8_t coreId)
@@ -73,5 +77,3 @@ void DmxTask::run(void *data) {
     }
 }
 
-// Global instance of the DmxTask
-DmxTask dmxTask(4096, 2, PRO_CPU_NUM);

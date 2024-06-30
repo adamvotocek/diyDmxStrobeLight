@@ -4,6 +4,10 @@
 #include <WrapperFreeRTOS.h>
 #include <esp_log.h>
 
+// Global instance of the LogTask
+LogTask logTask(2048, 1, PRO_CPU_NUM);
+
+// Log tag for this file
 static const char *TAG = "LogTask";
 
 LogTask::LogTask(uint32_t stackSize, uint8_t priority, uint8_t coreId)
@@ -74,6 +78,3 @@ void restartCPU(const char *TAG) {
     delay(5000); // This delay prevents any other tasks from running
     ESP.restart();
 }
-
-// Global instance of the LogTask
-LogTask logTask(2048, 1, PRO_CPU_NUM);

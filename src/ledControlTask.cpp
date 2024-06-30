@@ -7,6 +7,10 @@
 #include "dmxTask.hpp"
 #include "logTask.hpp"
 
+// Global instance of the LedControlTask
+LedControlTask ledControlTask(2048, 1, APP_CPU_NUM);
+
+// Log tag for this file
 static const char *TAG = "LedConTask";
 
 // Static variables
@@ -220,6 +224,3 @@ void LedControlTask::refreshSyncTimer()
     }
 }
 
-
-
-LedControlTask ledControlTask(2048, 1, APP_CPU_NUM);
